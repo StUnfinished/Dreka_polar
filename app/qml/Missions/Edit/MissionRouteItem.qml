@@ -14,6 +14,7 @@ Item {
     implicitWidth: label.width + Controls.Theme.margins
     implicitHeight: Controls.Theme.baseSize
 
+    // 鼠标悬停高亮
     Rectangle {
         id: hover
         anchors.fill: parent
@@ -22,6 +23,7 @@ Item {
         visible: mouseArea.containsMouse
     }
 
+    // 选中高亮
     Controls.Label {
         id: label
         anchors.centerIn: parent
@@ -29,6 +31,7 @@ Item {
         text: routeItem.name + " " + (inRouteIndex != 0 ? inRouteIndex : "")
     }
 
+    // 点击选中
     MouseArea {
         id: mouseArea
         anchors.fill: parent

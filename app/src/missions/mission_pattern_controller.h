@@ -4,6 +4,8 @@
 #include "i_missions_service.h"
 
 #include <QJsonArray>
+#include <QVariant> // 添加 QVariant, QVariantList, QVariantMap 支持
+#include <QString>
 
 namespace md::presentation
 {
@@ -30,6 +32,9 @@ public:
 
     Q_INVOKABLE QJsonArray areaPositions() const;
 
+    // 新增：供 QML/JS/C++ 调用的生成航线接口（与实现签名一致）
+    Q_INVOKABLE void generateAreaMission(const QVariantMap &params);
+
 public slots:
     void selectMission(const QVariant& missionId);
     void createPattern(const QString& patternTypeId);
@@ -43,6 +48,10 @@ signals:
     void missionChanged();
     void parameterValuesChanged();
     void pathPositionsChanged();
+
+    // 新增：生成结果回调信号（QML 侧 Connections 监视）
+    void onAreaMissionGenerated(const QVariantList &waypoints, const QVariantMap &summary);
+    void onAreaMissionFailed(const QString &reason);
 
 private:
     domain::IMissionsService* const m_missionsService;

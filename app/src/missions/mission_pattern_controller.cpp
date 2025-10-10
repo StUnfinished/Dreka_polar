@@ -1,9 +1,12 @@
 #include "mission_pattern_controller.h"
 
 #include <QDebug>
+#include <QJsonDocument> // 新增：用于序列化 QVariant -> JSON
 
 #include "locator.h"
 #include "mission_traits.h"
+#include "camera_model.h"
+#include "area_planner.h"
 
 using namespace md::domain;
 using namespace md::presentation;
@@ -158,4 +161,58 @@ void MissionPatternController::apply()
     m_missionsService->saveMission(m_mission);
 
     this->cancel();
+}
+
+// 如果已有 generateAreaMission，请替换其实现；下面为示例实现：
+void MissionPatternController::generateAreaMission(const QVariantMap &params)
+{
+    // 打印接收到的 params（序列化为 JSON，便于在控制台查看）
+    try {
+        QJsonDocument doc = QJsonDocument::fromVariant(QVariant(params));
+        qDebug().noquote() << "MissionPatternController::generateAreaMission received params:" << doc.toJson(QJsonDocument::Compact);
+    } catch (...) {
+        qDebug() << "MissionPatternController::generateAreaMission received params (non-serializable):" << params;
+    }
+
+    CameraModel cam;
+    // 优先从 params 中读取 camera 或 camera_file
+    if (params.contains("camera_file")) {
+        QString camFile = params.value("camera_file").toString();
+        if (!cam.loadFromFile(camFile)) {
+            qWarning() << "MissionPatternController: failed to load camera file:" << camFile << " — using defaults";
+        } else {
+            qDebug() << "Loaded camera from file:" << camFile;
+        }
+    } else if (params.contains("camera")) {
+        cam.loadFromMap(params.value("camera").toMap());
+        qDebug() << "Loaded camera from params.camera";
+    } else {
+        // 尝试加载默认相机文件（相对于可执行或资源目录，请根据项目调整路径）
+        if (cam.loadFromFile(QStringLiteral(":/cameras/default_camera.json"))) {
+            qDebug() << "Loaded default camera resource";
+        } else {
+            qDebug() << "Using CameraModel defaults";
+        }
+    }
+
+    // 调用规划器并打印过程
+    qDebug() << "Calling planner::planAreaMission(...)";
+    QVariantList waypoints = planner::planAreaMission(params, cam);
+    qDebug() << "planner::planAreaMission returned waypoints count =" << waypoints.size();
+
+    // 尝试序列化并打印完整 waypoints JSON（可能较大）
+    try {
+        QJsonDocument wdoc = QJsonDocument::fromVariant(QVariant(waypoints));
+        qDebug().noquote() << "Waypoints JSON:" << wdoc.toJson(QJsonDocument::Compact);
+    } catch (...) {
+        qDebug() << "Waypoints (non-serializable):" << waypoints;
+    }
+
+    // 发送回调信号给 QML / 前端
+    QVariantMap summary;
+    summary["waypoints_count"] = static_cast<int>(waypoints.size());
+    if (params.contains("altitude_m")) summary["altitude_m"] = params.value("altitude_m");
+    emit onAreaMissionGenerated(waypoints, summary);
+
+    qDebug() << "MissionPatternController::generateAreaMission finished and signal emitted";
 }

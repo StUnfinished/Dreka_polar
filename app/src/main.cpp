@@ -62,6 +62,8 @@
 #include "missions_map_controller.h"
 #include "missions_menu_controller.h"
 
+#include "missions/mission_pattern_controller.h"
+
 namespace
 {
 constexpr char gitRevision[] = "git_revision";
@@ -72,7 +74,7 @@ using namespace md;
 
 int main(int argc, char* argv[])
 {
-    qputenv("QTWEBENGINE_CHROMIUM_FLAGS", "--ignore-gpu-blacklist");
+    qputenv("QTWEBENGINE_CHROMIUM_FLAGS", "--disable-web-security --allow-file-access-from-files --ignore-gpu-blocklist");
 
     QCoreApplication::setOrganizationName("Midgrad");
     QCoreApplication::setApplicationVersion(
@@ -152,6 +154,8 @@ int main(int argc, char* argv[])
                                                               "MissionRouteItemController");
     qmlRegisterType<presentation::MissionsMenuController>("Dreka.Missions", 1, 0,
                                                           "MissionsMenuController");
+    qmlRegisterType<presentation::MissionPatternController>("Dreka.Missions", 1, 0,
+                                                           "MissionPatternController");
 
     QQmlApplicationEngine engine;
     industrialThemeActivate(true, &engine);
