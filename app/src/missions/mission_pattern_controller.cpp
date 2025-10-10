@@ -200,6 +200,25 @@ void MissionPatternController::generateAreaMission(const QVariantMap &params)
     QVariantList waypoints = planner::planAreaMission(params, cam);
     qDebug() << "planner::planAreaMission returned waypoints count =" << waypoints.size();
 
+    // 在尝试把规划结果写入 mission 之前，优先从 params 中取 missionId 并 selectMission
+    if (!m_mission && params.contains("missionId")) {
+        QVariant mid = params.value("missionId");
+        qDebug() << "generateAreaMission: selecting mission from params missionId =" << mid;
+        selectMission(mid);
+    }
+
+    // 如果仍未设置 m_mission，尝试从服务获取第一个可用 mission（作为回退）
+    if (!m_mission) {
+        auto missions = m_missionsService->missions();
+        if (!missions.isEmpty()) {
+            QVariant firstId = missions.first()->id();
+            qDebug() << "generateAreaMission: no mission selected in UI, falling back to first mission id =" << firstId;
+            selectMission(firstId);
+        } else {
+            qDebug() << "generateAreaMission: no missions available in IMissionsService";
+        }
+    }
+
     // 尝试序列化并打印完整 waypoints JSON（可能较大）
     try {
         QJsonDocument wdoc = QJsonDocument::fromVariant(QVariant(waypoints));
@@ -214,5 +233,78 @@ void MissionPatternController::generateAreaMission(const QVariantMap &params)
     if (params.contains("altitude_m")) summary["altitude_m"] = params.value("altitude_m");
     emit onAreaMissionGenerated(waypoints, summary);
 
+    // 新增：自动将规划结果加入当前任务（仅当 m_mission 已存在）
+    if (!m_mission) {
+        qWarning() << "MissionPatternController::generateAreaMission: no current mission selected - skipping addPlannedRouteToMission";
+    } else {
+        addPlannedRouteToMission(waypoints);
+    }
+
     qDebug() << "MissionPatternController::generateAreaMission finished and signal emitted";
+}
+
+void MissionPatternController::addPlannedRouteToMission(const QVariantList& waypoints)
+{
+
+    if (!m_mission){
+        qDebug() << "MissionPatternController::addPlannedRouteToMission failed: no current mission";
+        return;
+    }
+
+    MissionRoute* route = m_mission->route();
+    const MissionType* missionType = m_mission->type();
+
+    qDebug() << "MissionPatternController::addPlannedRouteToMission - preparing to add" << waypoints.size() << "waypoints to mission" << m_mission->id();
+
+    // 为避免在批量添加过程中触发 route->itemAdded 引发的重入/崩溃问题，
+    // 在添加期间阻塞 route 信号，添加完成后再一次性保存 mission。
+    // bool blocked = false;
+    // if (route) {
+    //     blocked = route->blockSignals(true);
+    //     qDebug() << "Blocked route signals for batch add (previous state):" << blocked;
+    // } else {
+    //     qWarning() << "addPlannedRouteToMission: route is null for mission" << m_mission->id();
+    //     return;
+    // }
+
+    for (int i = 0; i < waypoints.size(); ++i) {
+        QVariantMap pos = waypoints[i].toMap();
+
+        const MissionItemType* type = nullptr;  
+        if (i == 0) {  
+            type = missionType->homeItemType;  
+        } else {  
+            // 获取最后一个非HOME类型的航点（Waypoint类型）  
+            for (auto itemType : missionType->itemTypes) {  
+                if (itemType != missionType->homeItemType) {  
+                    type = itemType;    // 不break,继续遍历,最后一个会覆盖前面的
+                }  
+            }  
+        }  
+
+        if (!type) {
+            qWarning() << "addPlannedRouteToMission: no valid MissionItemType for index" << i << " skipping";
+            continue;
+        }
+
+        QVariantMap parameters = type->defaultParameters();
+
+        MissionRouteItem* item = new MissionRouteItem(type, type->shortName, utils::generateId(),
+                                                      parameters, pos);
+        item->setParameters(parameters);
+        route->addItem(item);
+
+        qDebug() << "addPlannedRouteToMission: created route item idx=" << i
+                 << " id=" << item->id()
+                 << " lat=" << pos.value("latitude") << " lon=" << pos.value("longitude");
+        // 不在此处每条持久化（避免触发服务端/信号重入），统一在下方保存
+        // m_missionsService->saveItem(route, item);
+    }
+
+    // 解除阻塞并一次性保存 mission（触发必要的 change 信号供 UI/Map 刷新）
+    // route->blockSignals(blocked); // 恢复先前状态（通常 false）
+    // qDebug() << "addPlannedRouteToMission: unblocked route signals, calling saveMission";
+    m_missionsService->saveMission(m_mission);
+
+    qDebug() << "MissionPatternController::addPlannedRouteToMission finished";
 }

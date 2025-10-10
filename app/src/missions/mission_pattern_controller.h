@@ -3,6 +3,7 @@
 
 #include "i_missions_service.h"
 
+#include <QObject>
 #include <QJsonArray>
 #include <QVariant> // 添加 QVariant, QVariantList, QVariantMap 支持
 #include <QString>
@@ -54,8 +55,9 @@ signals:
     void onAreaMissionFailed(const QString &reason);
 
 private:
+    void addPlannedRouteToMission(const QVariantList& waypoints);
+    
     domain::IMissionsService* const m_missionsService;
-
     domain::Mission* m_mission = nullptr;
     domain::RoutePattern* m_pattern = nullptr;
 };

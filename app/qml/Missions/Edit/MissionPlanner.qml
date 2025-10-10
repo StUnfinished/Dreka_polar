@@ -227,6 +227,23 @@ ColumnLayout {
                     console.log("Generate Route Mission - params (non-serializable)", params)
                 }
 
+                // 附加 missionId 到 params，优先使用 missionsMapController.selectedMissionId
+                try {
+                    var mid = null
+                    if (typeof missionsMapController !== "undefined") {
+                        mid = missionsMapController.selectedMissionId
+                        console.log("Using missionsMapController.selectedMissionId for missionId:", mid)
+                    }
+                    if (!mid && typeof missionPlannerController !== "undefined") {
+                        mid = missionPlannerController.missionId
+                        console.log("Fallback to missionPlannerController.missionId:", mid)
+                    }
+                    if (mid) params.missionId = mid
+                    else console.warn("No missionId available when calling generateAreaMission (will attempt backend fallback)")
+                } catch (e) {
+                    console.warn("Failed to detect missionId for generateAreaMission:", e)
+                }
+
                 // 调用后端 controller（如果存在）
                 if (typeof missionPlannerController !== "undefined") {
                     // 打印调用动作
@@ -249,35 +266,35 @@ ColumnLayout {
             onClicked: plannerRoot.closeDrawMode()
         }
 
-        Controls.Button {
-            // 开发调试按钮：向 mapObj 发起模拟 areaDrawn 回调（仅在开发时使用）
-            visible: true // 上线时改为 false 或移除
-            text: "DBG Emit Area"
-            Layout.preferredWidth: 110
-            onClicked: {
-                var sample = [
-                    { latitude: 37.7749, longitude: -122.4194, altitude: 10 },
-                    { latitude: 37.7759, longitude: -122.4194, altitude: 10 },
-                    { latitude: 37.7759, longitude: -122.4184, altitude: 10 }
-                ]
-                console.log("DBG: emitting sample area to mapObj (or calling onAreaDrawnFromJs)...", sample)
-                try {
-                    // 优先尝试通过 mapObj 的 QML 桥接函数
-                    if (plannerRoot.mapObj && typeof plannerRoot.mapObj.onAreaDrawnFromJs === "function") {
-                        plannerRoot.mapObj.onAreaDrawnFromJs(JSON.stringify(sample))
-                        console.log("DBG: called mapObj.onAreaDrawnFromJs")
-                    } else if (typeof mapView !== "undefined" && mapView.runJavaScript) {
-                        // fallback: 直接调用页面 JS 的桥接函数（如果存在）
-                        mapView.runJavaScript("if(window.channel && channel.objects && channel.objects.cesiumMap && channel.objects.cesiumMap.onAreaDrawnFromJs) channel.objects.cesiumMap.onAreaDrawnFromJs('" + JSON.stringify(sample) + "');")
-                        console.log("DBG: attempted mapView.runJavaScript fallback")
-                    } else {
-                        console.warn("DBG: no available path to emit sample area")
-                    }
-                } catch (e) {
-                    console.warn("DBG emit error:", e)
-                }
-            }
-        }
+        // Controls.Button {
+        //     // 开发调试按钮：向 mapObj 发起模拟 areaDrawn 回调（仅在开发时使用）
+        //     visible: true // 上线时改为 false 或移除
+        //     text: "DBG Emit Area"
+        //     Layout.preferredWidth: 110
+        //     onClicked: {
+        //         var sample = [
+        //             { latitude: 37.7749, longitude: -122.4194, altitude: 10 },
+        //             { latitude: 37.7759, longitude: -122.4194, altitude: 10 },
+        //             { latitude: 37.7759, longitude: -122.4184, altitude: 10 }
+        //         ]
+        //         console.log("DBG: emitting sample area to mapObj (or calling onAreaDrawnFromJs)...", sample)
+        //         try {
+        //             // 优先尝试通过 mapObj 的 QML 桥接函数
+        //             if (plannerRoot.mapObj && typeof plannerRoot.mapObj.onAreaDrawnFromJs === "function") {
+        //                 plannerRoot.mapObj.onAreaDrawnFromJs(JSON.stringify(sample))
+        //                 console.log("DBG: called mapObj.onAreaDrawnFromJs")
+        //             } else if (typeof mapView !== "undefined" && mapView.runJavaScript) {
+        //                 // fallback: 直接调用页面 JS 的桥接函数（如果存在）
+        //                 mapView.runJavaScript("if(window.channel && channel.objects && channel.objects.cesiumMap && channel.objects.cesiumMap.onAreaDrawnFromJs) channel.objects.cesiumMap.onAreaDrawnFromJs('" + JSON.stringify(sample) + "');")
+        //                 console.log("DBG: attempted mapView.runJavaScript fallback")
+        //             } else {
+        //                 console.warn("DBG: no available path to emit sample area")
+        //             }
+        //         } catch (e) {
+        //             console.warn("DBG emit error:", e)
+        //         }
+        //     }
+        // }
     }
 
     // ================= Map interaction callbacks =================
