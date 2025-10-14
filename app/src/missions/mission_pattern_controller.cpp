@@ -308,3 +308,25 @@ void MissionPatternController::addPlannedRouteToMission(const QVariantList& wayp
 
     qDebug() << "MissionPatternController::addPlannedRouteToMission finished";
 }
+
+// add: clear all waypoints from current mission
+void MissionPatternController::clearAllRouteItems()  
+{  
+    if (!m_mission) {  
+        qDebug() << "MissionPatternController::clearAllRouteItems failed: no current mission";  
+        return;  
+    }  
+  
+    MissionRoute* route = m_mission->route();  
+      
+    qDebug() << "MissionPatternController::clearAllRouteItems - removing" << route->count() << "waypoints";  
+      
+    // 从后往前删除  
+    while (route->count() > 0) {  
+        route->removeItem(route->item(route->count() - 1));  
+    }  
+      
+    m_missionsService->saveMission(m_mission);  
+      
+    qDebug() << "MissionPatternController::clearAllRouteItems finished";  
+}

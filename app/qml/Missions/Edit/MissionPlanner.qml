@@ -274,17 +274,7 @@ ColumnLayout {
             }
         }
 
-        // Controls.Button {
-        //     text: qsTr("Clear Drawings")
-        //     Layout.preferredWidth: 100
-        //     onClicked: plannerRoot.clearDrawings()
-        // }
-        Controls.Button {
-            text: qsTr("Exit Draw")
-            Layout.preferredWidth: 150
-            onClicked: plannerRoot.closeDrawMode()
-        }
-
+        
         // Controls.Button {
         //     // 开发调试按钮：向 mapObj 发起模拟 areaDrawn 回调（仅在开发时使用）
         //     visible: true // 上线时改为 false 或移除
@@ -314,6 +304,30 @@ ColumnLayout {
         //         }
         //     }
         // }
+    }
+
+    RowLayout{
+
+        // Controls.Button {
+        //     text: qsTr("Clear Drawings")
+        //     Layout.preferredWidth: 100
+        //     onClicked: plannerRoot.clearDrawings()
+        // }
+
+        // Clear ALl Waypoints
+        Controls.Button {  
+            text: qsTr("Clear All Waypoints")  
+            iconSource: "qrc:/icons/remove.svg"
+            Layout.fillWidth: true
+            onClicked: missionPlannerController.clearAllRouteItems()
+        }
+
+        // Exit Draw Mode
+        Controls.Button {
+            text: qsTr("Exit Draw Mode")
+            Layout.preferredWidth: 150
+            onClicked: plannerRoot.closeDrawMode()
+        }
     }
 
     // ================= Map interaction callbacks =================
