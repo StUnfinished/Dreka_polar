@@ -65,12 +65,24 @@ QVariantList planAreaMission(const QVariantMap &params, const CameraModel &camer
     double headingRad   = qDegreesToRadians(headingDeg);
 
     QVector<QPointF> polyLatLon;
+    double sumAlt = 0.0;
+    int altCount = 0;
+
+    // ✅ 读取多边形顶点（经纬度 + 高程）
     for (auto v : polyIn) {
         QVariantMap m = v.toMap();
         double lat = m.value("latitude", m.value("lat", 0.0)).toDouble();
         double lon = m.value("longitude", m.value("lon", 0.0)).toDouble();
+        double alt = m.value("altitude", m.value("alt", 0.0)).toDouble();
         polyLatLon.append(QPointF(lat, lon));
+        if (alt != 0.0) {
+            sumAlt += alt;
+            altCount++;
+        }
     }
+
+    // ✅ 若多边形顶点包含高程，计算平均地表高度
+    double avgGroundAlt = (altCount > 0) ? (sumAlt / altCount) : 0.0;
 
     double lat0 = polyLatLon[0].x();
     double lon0 = polyLatLon[0].y();
@@ -85,98 +97,83 @@ QVariantList planAreaMission(const QVariantMap &params, const CameraModel &camer
     double altitudeM = params.value("altitude_m", 0.0).toDouble();
     double gsd_m = params.value("gsd_m", 0.0).toDouble();
     if (altitudeM <= 0.0) {
-        if (gsd_m > 0.0) {
+        if (gsd_m > 0.0) {  // if GSD is given, calculate altitude
             double focal_mm = cameraModel.focalLengthMm();
             double sensor_w_mm = cameraModel.sensorWidthMm();
             int img_w_px = cameraModel.imageWidthPx();
             altitudeM = gsd_m * focal_mm * double(img_w_px) / sensor_w_mm;
         } else {
-            altitudeM = params.value("default_altitude_m", 120.0).toDouble();
+            altitudeM = params.value("default_altitude_m", 120.0).toDouble();  // if GSD not given, use default flight altitude 
         }
     }
 
-    if (gsd_m <= 0.0) {
+    if (gsd_m <= 0.0) {  // is GSD not given, calculate GSD at default altitude
         double rx, ry;
         cameraModel.groundResolutionAtAltitude(altitudeM, rx, ry);
         gsd_m = rx;
     }
 
     double imageGroundWidth = gsd_m * double(cameraModel.imageWidthPx());
-    double imageGroundHeight = gsd_m * double(cameraModel.imageHeightPx());
-
     double stripSpacing = imageGroundWidth * (1.0 - sideOverlap);
-    double alongSpacing = imageGroundHeight * (1.0 - frontOverlap);
-
     if (stripSpacing <= 0.1) stripSpacing = imageGroundWidth * 0.2;
-    if (alongSpacing <= 0.1) alongSpacing = imageGroundHeight * 0.2;
 
+    // 坐标旋转
     QVector<QPointF> polyRot = rotatePolygon(polyXY, -headingRad);
 
-    double minX = 1e18, maxX = -1e18, minY = 1e18, maxY = -1e18;
+    double minY = 1e18, maxY = -1e18;
     for (auto &p : polyRot) {
-        minX = qMin(minX, double(p.x()));
-        maxX = qMax(maxX, double(p.x()));
         minY = qMin(minY, double(p.y()));
         maxY = qMax(maxY, double(p.y()));
     }
 
-    QVector<QPointF> waypointsXY;
+    // 提取每条航线的起点和终点
+    QVector<QPair<QPointF, QPointF>> linePairs;
     for (double y = minY; y <= maxY + 1e-6; y += stripSpacing) {
         QVector<double> xs = scanlineIntersections(polyRot, y);
-        for (int i = 0; i+1 < xs.size(); i += 2) {
-            double x1 = xs[i], x2 = xs[i+1];
-            double segLen = qAbs(x2 - x1);
-            if (segLen < 1e-6) continue;
-            int nSamples = qMax(1, int(qCeil(segLen / alongSpacing)));
-            for (int s = 0; s <= nSamples; ++s) {
-                double t = double(s) / double(nSamples);
-                double x = x1 + t * (x2 - x1);
-                double yy = y;
-                waypointsXY.append(QPointF(x, yy));
-            }
+        for (int i = 0; i + 1 < xs.size(); i += 2) {
+            QPointF p1(xs[i], y);
+            QPointF p2(xs[i + 1], y);
+            linePairs.append(qMakePair(p1, p2));
         }
     }
 
-    const double tol = stripSpacing * 0.001 + 0.0001;
-    QVector<double> ys;
-    for (auto &p : waypointsXY) ys.append(p.y());
-    std::sort(ys.begin(), ys.end());
-    QVector<double> uniqY;
-    for (double y : ys) {
-        if (uniqY.isEmpty() || qAbs(y - uniqY.last()) > tol) uniqY.append(y);
-    }
-    QVector<QVector<QPointF>> lines;
-    lines.resize(uniqY.size());
-    for (auto &p : waypointsXY) {
-        int best = 0; double bestd = qAbs(p.y() - uniqY[0]);
-        for (int i=1;i<uniqY.size();++i){
-            double d=qAbs(p.y()-uniqY[i]);
-            if (d<bestd){bestd=d;best=i;}
-        }
-        lines[best].append(p);
+    // 按顺序反转奇数条线（蛇形）
+    for (int i = 0; i < linePairs.size(); ++i) {
+        if (i % 2 == 1)
+            std::swap(linePairs[i].first, linePairs[i].second);
     }
 
-    QVector<QPointF> orderedXY;
-    for (int i = 0; i < lines.size(); ++i) {
-        auto &ln = lines[i];
-        std::sort(ln.begin(), ln.end(), [](const QPointF &a, const QPointF &b){ return a.x() < b.x(); });
-        if (i % 2 == 1) std::reverse(ln.begin(), ln.end());
-        for (auto &p : ln) orderedXY.append(p);
-    }
-
-    for (auto &p : orderedXY) {
+    // ✅ 计算最终航点（叠加地表平均高程）
+    for (auto &line : linePairs) {
+        QPointF p1 = line.first;
+        QPointF p2 = line.second;
         double c = qCos(headingRad), s = qSin(headingRad);
-        double xr = p.x()*c - p.y()*s;
-        double yr = p.x()*s + p.y()*c;
-        double lat, lon;
-        xyToLatLon(lat0, lon0, xr, yr, lat, lon);
-        QVariantMap wp;
-        wp["latitude"] = lat;
-        wp["longitude"] = lon;
-        wp["altitude"] = altitudeM;
-        result.append(wp);
+
+        double xr1 = p1.x()*c - p1.y()*s;
+        double yr1 = p1.x()*s + p1.y()*c;
+        double xr2 = p2.x()*c - p2.y()*s;
+        double yr2 = p2.x()*s + p2.y()*c;
+
+        double lat1, lon1, lat2, lon2;
+        xyToLatLon(lat0, lon0, xr1, yr1, lat1, lon1);
+        xyToLatLon(lat0, lon0, xr2, yr2, lat2, lon2);
+
+        double finalAlt = altitudeM + avgGroundAlt;
+
+        QVariantMap wp1, wp2;
+        wp1["latitude"] = lat1;
+        wp1["longitude"] = lon1;
+        wp1["altitude"] = finalAlt;
+        wp2["latitude"] = lat2;
+        wp2["longitude"] = lon2;
+        wp2["altitude"] = finalAlt;
+
+        result.append(wp1);
+        result.append(wp2);
     }
 
     return result;
 }
+
+
 } // namespace planner

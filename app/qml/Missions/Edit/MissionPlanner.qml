@@ -128,32 +128,44 @@ ColumnLayout {
         visible: plannerRoot.selectedMissionType === qsTr("Area Mapping")
         spacing: 4
 
-        Controls.TextField { id: gsdField1; placeholderText: "GSD (m)"; text: "0.05" }
+        RowLayout {
+            Controls.Label { text: "GSD:" }
+            Controls.TextField { id: gsdField1; placeholderText: "GSD (m)"; text: "0.05" }
+            Controls.Label { text: "m" }
+        }
 
         RowLayout {
-            Controls.SpinBox { id: headingField1; from: 0; to: 360; value: 0; Layout.preferredWidth: 80 }
+            Controls.Label { text: "Fligh Route Angle:" }
+            Controls.SpinBox { id: headingField1; from: 0; to: 360; value: 0; Layout.preferredWidth: 120 }
             Controls.Label { text: "°" }
         }
 
         RowLayout {
-            Controls.SpinBox { id: frontOverlap1; from: 0; to: 100; value: 70; Layout.preferredWidth: 80 }
+            Controls.Label { text: "Heading Overlap:" }
+            Controls.SpinBox { id: frontOverlap1; from: 0; to: 100; value: 70; Layout.preferredWidth: 120 }
             Controls.Label { text: "%" }
         }
 
         RowLayout {
-            Controls.SpinBox { id: sideOverlap1; from: 0; to: 100; value: 60; Layout.preferredWidth: 80 }
+            Controls.Label { text: "Lateral Overlap:" }
+            Controls.SpinBox { id: sideOverlap1; from: 0; to: 100; value: 60; Layout.preferredWidth: 120 }
             Controls.Label { text: "%" }
         }
     }
 
     // ================= Strip Mapping =================
     ColumnLayout {
-        visible: plannerRoot.selectedMissionType === qsTr("Strip Mapping")
+        visible: plannerRoot.selectedMissionType === qsTr("Strip Mapping:")
         spacing: 4
 
-        Controls.TextField { id: gsdField2; placeholderText: "GSD (m)"; text: "0.05" }
+        RowLayout {
+            Controls.Label { text: "GSD:" }
+            Controls.TextField { id: gsdField2; placeholderText: "GSD (m)"; text: "0.05" }
+            Controls.Label { text: "m" }
+        }
 
         RowLayout {
+            Controls.Label { text: "Heading Overlap:" }
             Controls.SpinBox { id: frontOverlap2; from: 0; to: 100; value: 75; Layout.preferredWidth: 80 }
             Controls.Label { text: "%" }
         }
@@ -164,19 +176,26 @@ ColumnLayout {
         visible: plannerRoot.selectedMissionType === qsTr("POI Mapping")
         spacing: 4
 
-        Controls.TextField { id: gsdField3; placeholderText: "GSD (m)"; text: "0.05" }
+        RowLayout {
+            Controls.Label { text: "GSD:" }
+            Controls.TextField { id: gsdField3; placeholderText: "GSD (m)"; text: "0.05" }
+            Controls.Label { text: "m" }
+        }
 
         RowLayout {
+            Controls.Label { text: "Radius:" }
             Controls.SpinBox { id: radiusField; from: 10; to: 1000; value: 50; Layout.preferredWidth: 80 }
             Controls.Label { text: "m" }
         }
 
         RowLayout {
+            Controls.Label { text: "Heading Overlap:" }
             Controls.SpinBox { id: frontOverlap3; from: 0; to: 100; value: 80; Layout.preferredWidth: 80 }
             Controls.Label { text: "%" }
         }
 
         RowLayout {
+            Controls.Label { text: "Lateral Overlap:" }
             Controls.SpinBox { id: sideOverlap3; from: 0; to: 100; value: 70; Layout.preferredWidth: 80 }
             Controls.Label { text: "%" }
         }
@@ -261,8 +280,8 @@ ColumnLayout {
         //     onClicked: plannerRoot.clearDrawings()
         // }
         Controls.Button {
-            text: qsTr("Exit Draw Mode")
-            Layout.preferredWidth: 100
+            text: qsTr("Exit Draw")
+            Layout.preferredWidth: 150
             onClicked: plannerRoot.closeDrawMode()
         }
 

@@ -209,6 +209,7 @@ class CesiumWrapper {
                         if (!enable && typeof routePatternArea.clear === "function") routePatternArea.clear();
                     }
                     if (!enable && typeof routePatternArea.clear === "function") routePatternArea.clear();
+                    console.log("startRectangleDraw:", enable);
                 } catch (e) {
                     console.warn("startRectangleDraw error:", e);
                 }
@@ -360,7 +361,7 @@ class CesiumWrapper {
                                         var carto = Cesium.Cartographic.fromCartesian(pick);
                                         centerLat = Cesium.Math.toDegrees(carto.latitude);
                                         centerLon = Cesium.Math.toDegrees(carto.longitude);
-                                        targetHeight = Math.max(10, (carto.height || 0) + 10);
+                                        targetHeight = Math.max(300, (carto.height || 0) + 300);
                                         haveCenter = true;
                                     }
                                 }
