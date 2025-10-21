@@ -35,6 +35,7 @@ public:
 
     // 新增：供 QML/JS/C++ 调用的生成航线接口（与实现签名一致）
     Q_INVOKABLE void generateAreaMission(const QVariantMap &params);
+    Q_INVOKABLE void generateStripMission(const QVariantMap &params);
 
     // Add: clear all route items from current mission
     Q_INVOKABLE void clearAllRouteItems();

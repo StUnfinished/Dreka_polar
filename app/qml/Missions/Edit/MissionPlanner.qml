@@ -72,6 +72,8 @@ ColumnLayout {
     property var drawnPolygon: []
     property var drawnPolyline: []
     property var drawnPoi: null
+    
+    property string lastRequestedPattern: ""
 
     // reference to map object in parent scope (尝试兼容不同命名)
     property var mapObj: (typeof map !== "undefined" ? map : (typeof mapView !== "undefined" ? mapView : null))
@@ -155,7 +157,7 @@ ColumnLayout {
 
     // ================= Strip Mapping =================
     ColumnLayout {
-        visible: plannerRoot.selectedMissionType === qsTr("Strip Mapping:")
+        visible: plannerRoot.selectedMissionType === qsTr("Strip Mapping")
         spacing: 4
 
         RowLayout {
@@ -221,6 +223,7 @@ ColumnLayout {
                         pattern: "area",
                         polygon: plannerRoot.drawnPolygon
                     }
+                    plannerRoot.lastRequestedPattern = "area"
                 } else if (plannerRoot.selectedMissionType === qsTr("Strip Mapping")) {
                     params = {
                         gsd_m: parseFloat(gsdField2.text),
@@ -228,6 +231,7 @@ ColumnLayout {
                         pattern: "strip",
                         polyline: plannerRoot.drawnPolyline
                     }
+                    plannerRoot.lastRequestedPattern = "strip"
                 } else if (plannerRoot.selectedMissionType === qsTr("POI Mapping")) {
                     params = {
                         gsd_m: parseFloat(gsdField3.text),
@@ -237,6 +241,7 @@ ColumnLayout {
                         pattern: "poi",
                         poi: plannerRoot.drawnPoi
                     }
+                    plannerRoot.lastRequestedPattern = "poi"
                 }
 
                 // 新增：在 QML 控制台打印要发送的参数（便于调试）
@@ -265,12 +270,17 @@ ColumnLayout {
 
                 // 调用后端 controller（如果存在）
                 if (typeof missionPlannerController !== "undefined") {
-                    // 打印调用动作
-                    console.log("Calling missionPlannerController.generateAreaMission(...)")
-                    missionPlannerController.generateAreaMission(params)
+                    // 根据 pattern 调用不同的后端接口
+                    if (plannerRoot.lastRequestedPattern === "strip" && typeof missionPlannerController.generateStripMission === "function") {
+                        console.log("Calling missionPlannerController.generateStripMission(...)")
+                        missionPlannerController.generateStripMission(params)
+                    } else {
+                        console.log("Calling missionPlannerController.generateAreaMission(...)")
+                        missionPlannerController.generateAreaMission(params)
+                    }
                 } else {
-                    console.warn("missionPlannerController not found")
-                }
+                     console.warn("missionPlannerController not found")
+                 }
             }
         }
 
@@ -370,18 +380,43 @@ ColumnLayout {
     Connections {
         target: missionPlannerController
         function onAreaMissionGenerated(waypoints, summary) {
-            console.log("Waypoints generated:", waypoints.length, summary)
-            if (typeof missionRouteController !== "undefined") {
-                missionRouteController.setRouteItems(waypoints)
+            console.log("Plan generated (pattern=" + plannerRoot.lastRequestedPattern + "):", waypoints.length, summary)
+            if (plannerRoot.lastRequestedPattern === "strip") {
+                // strip-specific handling (if different logic is needed, put here)
+                plannerRoot.onStripMissionGenerated(waypoints, summary)
+            } else {
+                // default area handling
+                console.log("Waypoints generated:", waypoints.length, summary)
+                if (typeof missionRouteController !== "undefined") {
+                    missionRouteController.setRouteItems(waypoints)
+                }
+                if (plannerRoot.mapObj && plannerRoot.mapObj.showPlannedRoute) {
+                    plannerRoot.mapObj.showPlannedRoute(waypoints)
+                } else if (typeof mapView !== "undefined") {
+                    mapView.runJavaScript("showPlannedRoute(" + JSON.stringify(waypoints) + ")")
+                }
             }
-            if (plannerRoot.mapObj && plannerRoot.mapObj.showPlannedRoute) {
-                plannerRoot.mapObj.showPlannedRoute(waypoints)
-            } else if (typeof mapView !== "undefined") {
-                mapView.runJavaScript("showPlannedRoute(" + JSON.stringify(waypoints) + ")")
-            }
+            // clear request marker after handling
+            plannerRoot.lastRequestedPattern = ""
         }
+
         function onAreaMissionFailed(reason) {
             console.warn("Plan failed:", reason)
+            // 若需要针对 strip 做不同提示，可在此分支判断 lastRequestedPattern
+            // 简单用户提示（可替换为 UI 弹窗）
+        }
+    }
+
+    // Strip-specific callback (called from dispatched handler above)
+    function onStripMissionGenerated(waypoints, summary) {
+        console.log("Strip mission generated:", waypoints.length, summary)
+        if (typeof missionRouteController !== "undefined") {
+            missionRouteController.setRouteItems(waypoints)
+        }
+        if (plannerRoot.mapObj && plannerRoot.mapObj.showPlannedRoute) {
+            plannerRoot.mapObj.showPlannedRoute(waypoints)
+        } else if (typeof mapView !== "undefined") {
+            mapView.runJavaScript("showPlannedRoute(" + JSON.stringify(waypoints) + ")")
         }
     }
 

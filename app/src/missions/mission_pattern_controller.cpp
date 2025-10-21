@@ -7,6 +7,7 @@
 #include "mission_traits.h"
 #include "camera_model.h"
 #include "area_planner.h"
+#include "strip_planner.h"
 
 using namespace md::domain;
 using namespace md::presentation;
@@ -329,4 +330,79 @@ void MissionPatternController::clearAllRouteItems()
     m_missionsService->saveMission(m_mission);  
       
     qDebug() << "MissionPatternController::clearAllRouteItems finished";  
+}
+
+void MissionPatternController::generateStripMission(const QVariantMap &params)
+{
+    // 打印接收到的 params
+    try {
+        QJsonDocument doc = QJsonDocument::fromVariant(QVariant(params));
+        qDebug().noquote() << "MissionPatternController::generateStripMission received params:" << doc.toJson(QJsonDocument::Compact);
+    } catch (...) {
+        qDebug() << "MissionPatternController::generateStripMission received params (non-serializable):" << params;
+    }
+
+    CameraModel cam;
+    if (params.contains("camera_file")) {
+        QString camFile = params.value("camera_file").toString();
+        if (!cam.loadFromFile(camFile)) {
+            qWarning() << "MissionPatternController: failed to load camera file:" << camFile << " — using defaults";
+        } else {
+            qDebug() << "Loaded camera from file:" << camFile;
+        }
+    } else if (params.contains("camera")) {
+        cam.loadFromMap(params.value("camera").toMap());
+        qDebug() << "Loaded camera from params.camera";
+    } else {
+        if (cam.loadFromFile(QStringLiteral(":/cameras/default_camera.json"))) {
+            qDebug() << "Loaded default camera resource";
+        } else {
+            qDebug() << "Using CameraModel defaults";
+        }
+    }
+
+    qDebug() << "Calling planner::planStripMission(...)";
+    QVariantList waypoints = planner::planStripMission(params, cam);
+    qDebug() << "planner::planStripMission returned waypoints count =" << waypoints.size();
+
+    // 选择 mission（优先 params 中的 missionId）
+    if (!m_mission && params.contains("missionId")) {
+        QVariant mid = params.value("missionId");
+        qDebug() << "generateStripMission: selecting mission from params missionId =" << mid;
+        selectMission(mid);
+    }
+
+    if (!m_mission) {
+        auto missions = m_missionsService->missions();
+        if (!missions.isEmpty()) {
+            QVariant firstId = missions.first()->id();
+            qDebug() << "generateStripMission: no mission selected in UI, falling back to first mission id =" << firstId;
+            selectMission(firstId);
+        } else {
+            qDebug() << "generateStripMission: no missions available in IMissionsService";
+        }
+    }
+
+    // 打印 waypoints（可选）
+    try {
+        QJsonDocument wdoc = QJsonDocument::fromVariant(QVariant(waypoints));
+        qDebug().noquote() << "Strip waypoints JSON:" << wdoc.toJson(QJsonDocument::Compact);
+    } catch (...) {
+        qDebug() << "Strip waypoints (non-serializable):" << waypoints;
+    }
+
+    // 回调前端（复用现有 onAreaMissionGenerated 以便前端已有处理）
+    QVariantMap summary;
+    summary["waypoints_count"] = static_cast<int>(waypoints.size());
+    if (params.contains("altitude_m")) summary["altitude_m"] = params.value("altitude_m");
+    emit onAreaMissionGenerated(waypoints, summary);
+
+    // 自动加入当前 mission（如果已选）
+    if (!m_mission) {
+        qWarning() << "MissionPatternController::generateStripMission: no current mission selected - skipping addPlannedRouteToMission";
+    } else {
+        addPlannedRouteToMission(waypoints);
+    }
+
+    qDebug() << "MissionPatternController::generateStripMission finished and signal emitted";
 }

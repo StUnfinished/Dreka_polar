@@ -148,45 +148,45 @@ class CesiumWrapper {
                 } catch (e) { console.warn("routePatternController hook wiring failed", e); }
             }
 
-            // Input-based POI click handler (enabled/disabled via window.enablePoiClick)
-            var poiClickEnabled = false;
-            var poiClickSubscription = null;
-            function enablePoiClickInternal(enable) {
-                poiClickEnabled = !!enable;
-                if (poiClickEnabled) {
-                    if (poiClickSubscription === null) {
-                        poiClickSubscription = that.input.subscribe(InputTypes.ON_CLICK, (event, cartesian, modifier) => {
-                            if (!Cesium.defined(cartesian)) return false;
-                            var cartographic = Cesium.Cartographic.fromCartesian(cartesian);
-                            var pt = {
-                                latitude: Cesium.Math.toDegrees(cartographic.latitude),
-                                longitude: Cesium.Math.toDegrees(cartographic.longitude),
-                                altitude: cartographic.height
-                            };
-                            try {
-                                if (routePatternController && routePatternController.setPoi) {
-                                    routePatternController.setPoi(pt);
-                                } else if (routePatternController && routePatternController.setAreaPositions) {
-                                    // fallback: send single-point array
-                                    routePatternController.setAreaPositions([pt]);
-                                } else if (missionPlannerController && missionPlannerController.onPoiClicked) {
-                                    missionPlannerController.onPoiClicked(JSON.stringify(pt));
-                                } else if (channel && channel.objects && channel.objects.cesiumMap && channel.objects.cesiumMap.onPoiClickedFromJs) {
-                                    channel.objects.cesiumMap.onPoiClickedFromJs(JSON.stringify(pt));
-                                }
-                            } catch (e) {
-                                console.warn("Failed to call controller for POI click:", e);
-                            }
-                            return true;
-                        });
-                    }
-                } else {
-                    if (poiClickSubscription !== null) {
-                        that.input.unsubscribe(poiClickSubscription);
-                        poiClickSubscription = null;
-                    }
-                }
-            }
+            // // Input-based POI click handler (enabled/disabled via window.enablePoiClick)
+            // var poiClickEnabled = false;
+            // var poiClickSubscription = null;
+            // function enablePoiClickInternal(enable) {
+            //     poiClickEnabled = !!enable;
+            //     if (poiClickEnabled) {
+            //         if (poiClickSubscription === null) {
+            //             poiClickSubscription = that.input.subscribe(InputTypes.ON_CLICK, (event, cartesian, modifier) => {
+            //                 if (!Cesium.defined(cartesian)) return false;
+            //                 var cartographic = Cesium.Cartographic.fromCartesian(cartesian);
+            //                 var pt = {
+            //                     latitude: Cesium.Math.toDegrees(cartographic.latitude),
+            //                     longitude: Cesium.Math.toDegrees(cartographic.longitude),
+            //                     altitude: cartographic.height
+            //                 };
+            //                 try {
+            //                     if (routePatternController && routePatternController.setPoi) {
+            //                         routePatternController.setPoi(pt);
+            //                     } else if (routePatternController && routePatternController.setAreaPositions) {
+            //                         // fallback: send single-point array
+            //                         routePatternController.setAreaPositions([pt]);
+            //                     } else if (missionPlannerController && missionPlannerController.onPoiClicked) {
+            //                         missionPlannerController.onPoiClicked(JSON.stringify(pt));
+            //                     } else if (channel && channel.objects && channel.objects.cesiumMap && channel.objects.cesiumMap.onPoiClickedFromJs) {
+            //                         channel.objects.cesiumMap.onPoiClickedFromJs(JSON.stringify(pt));
+            //                     }
+            //                 } catch (e) {
+            //                     console.warn("Failed to call controller for POI click:", e);
+            //                 }
+            //                 return true;
+            //             });
+            //         }
+            //     } else {
+            //         if (poiClickSubscription !== null) {
+            //             that.input.unsubscribe(poiClickSubscription);
+            //             poiClickSubscription = null;
+            //         }
+            //     }
+            // }
 
             // Expose JS functions for QML to call (via runJavaScript)
             // startRectangleDraw(enable) - toggles polygon/rectangle drawing tool
@@ -215,93 +215,161 @@ class CesiumWrapper {
                 }
             };
  
-             // state for custom polyline draw
-            var _polylineMode = false;
-            var _polylineClickSub = null;
-            var _polylineMoveSub = null;
-            var _polylinePoints = [];
-            var _polylineEntity = null;
-
+            
             // startPolylineDraw(enable) - toggles polyline drawing (use internal click handling)
+            // polyline draw state (inside webChannel callback / has access to `that` and `channel`)
+            var _polylineHandler = null;
+            var _polylineEntity = null;
+            var _polylinePositions = []; // 存 Cartesian3 对象
+
             window.startPolylineDraw = function(enable) {
                 try {
-                    // disable if already enabled
-                    if (!enable) {
-                        _polylineMode = false;
-                        // unsubscribe click
-                        if (_polylineClickSub !== null) {
-                            that.input.unsubscribe(_polylineClickSub);
-                            _polylineClickSub = null;
-                        }
-                        if (_polylineMoveSub !== null) {
-                            that.input.unsubscribe(_polylineMoveSub);
-                            _polylineMoveSub = null;
-                        }
-                        // finalize: send points to controller then clear preview
-                        try {
-                            var payload = _polylinePoints.map(p => ({ latitude: p.lat, longitude: p.lon, altitude: p.alt }));
-                            if (routePatternController && routePatternController.setPolylinePositions) {
-                                routePatternController.setPolylinePositions(payload);
-                            } else if (missionPlannerController && missionPlannerController.onPolylineDrawn) {
-                                missionPlannerController.onPolylineDrawn(JSON.stringify(payload));
-                            } else if (channel && channel.objects && channel.objects.cesiumMap && channel.objects.cesiumMap.onPolylineDrawnFromJs) {
-                                channel.objects.cesiumMap.onPolylineDrawnFromJs(JSON.stringify(payload));
-                            }
-                        } catch (e) { console.warn("finalize polyline callback failed", e); }
-                        // clear temp
-                        _polylinePoints = [];
-                        if (_polylineEntity) {
-                            that.viewer.entities.remove(_polylineEntity);
-                            _polylineEntity = null;
-                        }
+                    console.log("startPolylineDraw called, enable =", enable);
+
+                    var viewer = (typeof that !== "undefined" && that.viewer) ? that.viewer :
+                                 (typeof cesiumWrapper !== "undefined" ? cesiumWrapper.viewer : null);
+                    if (!viewer) {
+                        console.warn("Cesium viewer not found (startPolylineDraw)");
                         return;
                     }
 
-                    // enable drawing
-                    _polylineMode = true;
-                    _polylinePoints = [];
+                    // 停止绘制：解绑 handler，并异步采样地形高度后回调 QML
+                    if (!enable) {
+                        if (_polylineHandler) {
+                            _polylineHandler.destroy();
+                            _polylineHandler = null;
+                        }
 
-                    // create preview entity
-                    if (!_polylineEntity) {
-                        _polylineEntity = that.viewer.entities.add({
-                            polyline: {
-                                positions: new Cesium.CallbackProperty(function() {
-                                    return (_polylinePoints.length > 0) ?
-                                        Cesium.Cartesian3.fromDegreesArrayHeights(_polylinePoints.flatMap(p => [p.lon, p.lat, p.alt])) : [];
-                                }, false),
-                                width: 3,
-                                material: Cesium.Color.CYAN.withAlpha(0.9),
-                                clampToGround: false
-                            }
+                        // 如果没有点，直接清理并返回
+                        if (!_polylinePositions || _polylinePositions.length === 0) {
+                            if (_polylineEntity) { viewer.entities.remove(_polylineEntity); _polylineEntity = null; }
+                            _polylinePositions = [];
+                            return;
+                        }
+
+                        // 将 Cartesian3 -> Cartographic（经纬，当前高度可能是临时的），准备采样地形
+                        var cartographics = _polylinePositions.map(function(c) {
+                            return Cesium.Cartographic.fromCartesian(c);
                         });
+
+                        // 采样最详细地形并回调（异步）
+                        Cesium.sampleTerrainMostDetailed(viewer.terrainProvider, cartographics).then(function(updated) {
+                            var pts = updated.map(function(carto) {
+                                var terrainH = (typeof carto.height === "number") ? carto.height : 0;
+                                return {
+                                    latitude: Cesium.Math.toDegrees(carto.latitude),
+                                    longitude: Cesium.Math.toDegrees(carto.longitude),
+                                    altitude: terrainH
+                                };
+                            });
+
+                            // 回调 QML
+                            try {
+                                if (channel && channel.objects && channel.objects.cesiumMap && channel.objects.cesiumMap.onPolylineDrawnFromJs) {
+                                    channel.objects.cesiumMap.onPolylineDrawnFromJs(JSON.stringify(pts));
+                                }
+                            } catch (e) { console.warn("polyline callback error:", e); }
+
+                            // ✅ 新增：绘制最终折线
+                            const positions = pts.map(p => Cesium.Cartesian3.fromDegrees(p.longitude, p.latitude, p.altitude));
+                            window._finalPolylineEntity = viewer.entities.add({
+                                polyline: {
+                                    positions: positions,
+                                    width: 2,
+                                    material: Cesium.Color.YELLOW.withAlpha(0.8),
+                                    clampToGround: false
+                                }
+                            });
+
+                            // ✅ 可选：飞到折线范围
+                            // viewer.flyTo(window._finalPolylineEntity);
+
+                            // 清理 preview
+                            if (_polylineEntity) { viewer.entities.remove(_polylineEntity); _polylineEntity = null; }
+                            _polylinePositions = [];
+                        }).otherwise(function(err){
+                            console.warn("sampleTerrainMostDetailed failed:", err);
+                            // fallback: send non-sampled lat/lon using current cartographics heights
+                            var pts = cartographics.map(function(carto) {
+                                return {
+                                    latitude: Cesium.Math.toDegrees(carto.latitude),
+                                    longitude: Cesium.Math.toDegrees(carto.longitude),
+                                    altitude: (typeof carto.height === "number") ? carto.height : 0
+                                };
+                            });
+                            try {
+                                if (channel && channel.objects && channel.objects.cesiumMap && channel.objects.cesiumMap.onPolylineDrawnFromJs) {
+                                    channel.objects.cesiumMap.onPolylineDrawnFromJs(JSON.stringify(pts));
+                                }
+                            } catch (e) { /* ignore */ }
+                            if (_polylineEntity) { viewer.entities.remove(_polylineEntity); _polylineEntity = null; }
+                            _polylinePositions = [];
+                        });
+
+                        return;
                     }
 
-                    // click subscription: add points
-                    if (_polylineClickSub === null) {
-                        _polylineClickSub = that.input.subscribe(InputTypes.ON_CLICK, (event, cartesian, modifier) => {
-                            if (!Cesium.defined(cartesian)) return false;
-                            var cart = Cesium.Cartographic.fromCartesian(cartesian);
-                            var lat = Cesium.Math.toDegrees(cart.latitude);
-                            var lon = Cesium.Math.toDegrees(cart.longitude);
-                            var alt = cart.height || 0;
-                            _polylinePoints.push({ lat: lat, lon: lon, alt: alt });
-                            return true;
-                        });
+                    // 启动绘制：初始化 preview（用经纬 + 小高度构造 Cartesian3，保证可见且不会出非常负的高度）
+                    if (_polylineHandler) {
+                        _polylineHandler.destroy();
+                        _polylineHandler = null;
                     }
+                    _polylinePositions = [];
 
-                    // optional move subscription to show preview point (no change to path, just UX)
-                    if (_polylineMoveSub === null) {
-                        _polylineMoveSub = that.input.subscribe(InputTypes.ON_MOVE, (event, cartesian, modifier) => {
-                            // not strictly necessary; kept to update callback property if desired
-                            return true;
-                        });
+                    if (_polylineEntity) {
+                        viewer.entities.remove(_polylineEntity);
+                        _polylineEntity = null;
                     }
+                    _polylineEntity = viewer.entities.add({
+                        polyline: {
+                            positions: new Cesium.CallbackProperty(function() {
+                                return _polylinePositions.length ? _polylinePositions : [];
+                            }, false),
+                            width: 2,
+                            material: Cesium.Color.CYAN.withAlpha(0.8),
+                            // clampToGround 若需贴地，可尝试 true，但与 ground primitives/terrain 有兼容问题
+                            clampToGround: false
+                        }
+                    });
+
+                    _polylineHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+
+                    // 左键添加点：使用 camera.pickEllipsoid 获取经纬（高度设为小正值用于预览）
+                    _polylineHandler.setInputAction(function(click) {
+                        var cart2 = new Cesium.Cartesian2(click.position.x, click.position.y);
+                        var cartographic = null;
+                        try {
+                            // 优先通过 pickEllipsoid 获取经纬（更稳定）
+                            var posOnEllipsoid = viewer.camera.pickEllipsoid(cart2, viewer.scene.globe.ellipsoid);
+                            if (!Cesium.defined(posOnEllipsoid)) return;
+                            cartographic = Cesium.Cartographic.fromCartesian(posOnEllipsoid);
+                            var latDeg = Cesium.Math.toDegrees(cartographic.latitude);
+                            var lonDeg = Cesium.Math.toDegrees(cartographic.longitude);
+                            // 给预览一个小高度（1m）以避免渲染在地形下
+                            var previewHeight = (typeof cartographic.height === "number" ? cartographic.height : 0) + 1.0;
+                            var cart3 = Cesium.Cartesian3.fromDegrees(lonDeg, latDeg, previewHeight);
+                            _polylinePositions.push(cart3);
+                        } catch (e) {
+                            console.warn("polyline click handling error:", e);
+                        }
+
+                    }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+
+                    // 右键结束绘制
+                    _polylineHandler.setInputAction(function() {
+                        window.startPolylineDraw(false);
+                    }, Cesium.ScreenSpaceEventType.RIGHT_CLICK);
+
+                    console.log("Polyline draw mode enabled");
                 } catch (e) {
                     console.warn("startPolylineDraw error:", e);
                 }
             };
-
-            // setTopDownView(enabled) - adjust camera for orthographic/top-down look with safe altitude
+            
+            // expose enablePoiClick to window
+            //  window.enablePoiClick = enablePoiClickInternal;
+ 
+             // setTopDownView(enabled) - adjust camera for orthographic/top-down look with safe altitude
             window.setTopDownView = function(enabled) {
                 try {
                     var camera = that.viewer && that.viewer.camera;
