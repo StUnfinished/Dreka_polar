@@ -8,6 +8,7 @@
 #include "camera_model.h"
 #include "area_planner.h"
 #include "strip_planner.h"
+#include "poi_planner.h"
 
 using namespace md::domain;
 using namespace md::presentation;
@@ -391,7 +392,7 @@ void MissionPatternController::generateStripMission(const QVariantMap &params)
         qDebug() << "Strip waypoints (non-serializable):" << waypoints;
     }
 
-    // 回调前端（复用现有 onAreaMissionGenerated 以便前端已有处理）
+    // 回调前端
     QVariantMap summary;
     summary["waypoints_count"] = static_cast<int>(waypoints.size());
     if (params.contains("altitude_m")) summary["altitude_m"] = params.value("altitude_m");
@@ -405,4 +406,64 @@ void MissionPatternController::generateStripMission(const QVariantMap &params)
     }
 
     qDebug() << "MissionPatternController::generateStripMission finished and signal emitted";
+}
+
+void MissionPatternController::generatePoiMission(const QVariantMap &params)
+{
+    try {
+        QJsonDocument doc = QJsonDocument::fromVariant(QVariant(params));
+        qDebug().noquote() << "MissionPatternController::generatePoiMission received params:" << doc.toJson(QJsonDocument::Compact);
+    } catch (...) {
+        qDebug() << "MissionPatternController::generatePoiMission received params (non-serializable):" << params;
+    }
+
+    CameraModel cam;
+    if (params.contains("camera_file")) {
+        QString camFile = params.value("camera_file").toString();
+        if (!cam.loadFromFile(camFile)) {
+            qWarning() << "MissionPatternController: failed to load camera file:" << camFile << " — using defaults";
+        } else {
+            qDebug() << "Loaded camera from file:" << camFile;
+        }
+    } else if (params.contains("camera")) {
+        cam.loadFromMap(params.value("camera").toMap());
+        qDebug() << "Loaded camera from params.camera";
+    } else {
+        if (cam.loadFromFile(QStringLiteral(":/cameras/default_camera.json"))) {
+            qDebug() << "Loaded default camera resource";
+        } else {
+            qDebug() << "Using CameraModel defaults";
+        }
+    }
+
+    qDebug() << "Calling planner::planPoiMission(...)";
+    QVariantList waypoints = planner::planPoiMission(params, cam);
+    qDebug() << "planner::planPoiMission returned waypoints count =" << waypoints.size();
+
+    if (waypoints.isEmpty()) {
+        emit onAreaMissionFailed(QStringLiteral("Poi planner returned no waypoints"));
+        return;
+    }
+
+    // ensure mission selection
+    if (!m_mission && params.contains("missionId")) {
+        selectMission(params.value("missionId"));
+    }
+    if (!m_mission) {
+        auto missions = m_missionsService->missions();
+        if (!missions.isEmpty()) selectMission(missions.first()->id());
+    }
+
+    QVariantMap summary;
+    summary["waypoints_count"] = static_cast<int>(waypoints.size());
+    if (params.contains("radius")) summary["radius_m"] = params.value("radius");
+    emit onAreaMissionGenerated(waypoints, summary);
+
+    if (!m_mission) {
+        qWarning() << "MissionPatternController::generatePoiMission: no current mission selected - skipping addPlannedRouteToMission";
+    } else {
+        addPlannedRouteToMission(waypoints);
+    }
+
+    qDebug() << "MissionPatternController::generatePoiMission finished";
 }

@@ -282,7 +282,7 @@ class CesiumWrapper {
                             });
 
                             // ✅ 可选：飞到折线范围
-                            // viewer.flyTo(window._finalPolylineEntity);
+                            viewer.flyTo(window._finalPolylineEntity);
 
                             // 清理 preview
                             if (_polylineEntity) { viewer.entities.remove(_polylineEntity); _polylineEntity = null; }
@@ -366,10 +366,124 @@ class CesiumWrapper {
                 }
             };
             
-            // expose enablePoiClick to window
-            //  window.enablePoiClick = enablePoiClickInternal;
- 
-             // setTopDownView(enabled) - adjust camera for orthographic/top-down look with safe altitude
+            // POI click state (inside webChannel callback)
+            var _poiHandler = null;
+            var _poiEntity = null;
+            var _poiLastCartesian = null;
+
+            // enablePoiClick(enable) - allow single-click POI pick, sample terrain and callback to QML
+            window.enablePoiClick = function(enable) {
+                try {
+                    console.log("enablePoiClick called, enable =", enable);
+                    var viewer = (typeof that !== "undefined" && that.viewer) ? that.viewer :
+                                 (typeof cesiumWrapper !== "undefined" ? cesiumWrapper.viewer : null);
+                    if (!viewer) {
+                        console.warn("Cesium viewer not found (enablePoiClick)");
+                        return;
+                    }
+
+                    // disable: remove handler and keep last marker
+                    if (!enable) {
+                        if (_poiHandler) {
+                            _poiHandler.destroy();
+                            _poiHandler = null;
+                        }
+                        return;
+                    }
+
+                    // enable: create handler for a single LEFT_CLICK to capture POI
+                    if (_poiHandler) {
+                        _poiHandler.destroy();
+                        _poiHandler = null;
+                    }
+                    _poiHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+
+                    _poiHandler.setInputAction(function(click) {
+                        try {
+                            // pick position: prefer camera.pickEllipsoid for stable lat/lon, fallback to pickPosition
+                            var cart2 = new Cesium.Cartesian2(click.position.x, click.position.y);
+                            var picked = viewer.camera.pickEllipsoid(cart2, viewer.scene.globe.ellipsoid);
+                            if (!Cesium.defined(picked) && viewer.scene.pickPositionSupported) {
+                                picked = viewer.scene.pickPosition(click.position);
+                            }
+                            if (!Cesium.defined(picked)) {
+                                console.warn("enablePoiClick: no position picked");
+                                return;
+                            }
+                            _poiLastCartesian = picked;
+
+                            // show temporary marker at small offset above terrain (use 1m for preview)
+                            var carto = Cesium.Cartographic.fromCartesian(picked);
+                            var lat = Cesium.Math.toDegrees(carto.latitude);
+                            var lon = Cesium.Math.toDegrees(carto.longitude);
+                            var previewH = (typeof carto.height === "number" ? carto.height : 0) + 1.0;
+                            if (_poiEntity) { viewer.entities.remove(_poiEntity); _poiEntity = null; }
+                            _poiEntity = viewer.entities.add({
+                                position: Cesium.Cartesian3.fromDegrees(lon, lat, previewH),
+                                point: { pixelSize: 10, color: Cesium.Color.ORANGE },
+                                label: { text: "POI", font: "14px sans-serif", fillColor: Cesium.Color.WHITE, style: Cesium.LabelStyle.FILL_AND_OUTLINE }
+                            });
+
+                            // sample terrain for accurate altitude and then call QML bridge
+                            var cartographics = [Cesium.Cartographic.fromCartesian(picked)];
+                            Cesium.sampleTerrainMostDetailed(viewer.terrainProvider, cartographics).then(function(updated) {
+                                var c = updated[0];
+                                var terrainH = (typeof c.height === "number") ? c.height : 0;
+                                var payload = {
+                                    latitude: Cesium.Math.toDegrees(c.latitude),
+                                    longitude: Cesium.Math.toDegrees(c.longitude),
+                                    altitude: terrainH
+                                };
+                                // call QML bridge
+                                try {
+                                    if (channel && channel.objects && channel.objects.cesiumMap && channel.objects.cesiumMap.onPoiClickedFromJs) {
+                                        channel.objects.cesiumMap.onPoiClickedFromJs(JSON.stringify(payload));
+                                    } else if (typeof missionPlannerController !== "undefined" && missionPlannerController.onPoiClicked) {
+                                        missionPlannerController.onPoiClicked(JSON.stringify(payload));
+                                    } else {
+                                        console.warn("enablePoiClick: no bridge target for POI callback");
+                                    }
+                                } catch (e) {
+                                    console.warn("enablePoiClick: callback error", e);
+                                }
+                                // keep marker at sampled altitude (update entity)
+                                if (_poiEntity) {
+                                    var pos = Cesium.Cartesian3.fromDegrees(payload.longitude, payload.latitude, payload.altitude + 1.0);
+                                    _poiEntity.position = pos;
+                                }
+                            }).otherwise(function(err){
+                                console.warn("enablePoiClick: sampleTerrain failed:", err);
+                                // fallback: use carto.height if available
+                                var c = cartographics[0];
+                                var payload = {
+                                    latitude: Cesium.Math.toDegrees(c.latitude),
+                                    longitude: Cesium.Math.toDegrees(c.longitude),
+                                    altitude: (typeof c.height === "number" ? c.height : 0)
+                                };
+                                try {
+                                    if (channel && channel.objects && channel.objects.cesiumMap && channel.objects.cesiumMap.onPoiClickedFromJs) {
+                                        channel.objects.cesiumMap.onPoiClickedFromJs(JSON.stringify(payload));
+                                    }
+                                } catch (e) { /* ignore */ }
+                            });
+
+                            // after single click, disable handler to avoid multiple picks until re-enabled
+                            if (_poiHandler) {
+                                _poiHandler.destroy();
+                                _poiHandler = null;
+                            }
+                        } catch (ex) {
+                            console.warn("enablePoiClick handler error:", ex);
+                        }
+                    }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+
+                    console.log("POI click enabled (single-click)");
+                } catch (e) {
+                    console.warn("enablePoiClick error:", e);
+                }
+            };
+            
+            // setTopDownView(enabled) - adjust camera for orthographic/top-down look with safe altitude
             window.setTopDownView = function(enabled) {
                 try {
                     var camera = that.viewer && that.viewer.camera;

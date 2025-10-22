@@ -274,6 +274,9 @@ ColumnLayout {
                     if (plannerRoot.lastRequestedPattern === "strip" && typeof missionPlannerController.generateStripMission === "function") {
                         console.log("Calling missionPlannerController.generateStripMission(...)")
                         missionPlannerController.generateStripMission(params)
+                    } else if (plannerRoot.lastRequestedPattern === "poi" && typeof missionPlannerController.generatePoiMission === "function") {
+                        console.log("Calling missionPlannerController.generatePoiMission(...)")
+                        missionPlannerController.generatePoiMission(params)
                     } else {
                         console.log("Calling missionPlannerController.generateAreaMission(...)")
                         missionPlannerController.generateAreaMission(params)
@@ -370,6 +373,14 @@ ColumnLayout {
             try {
                 plannerRoot.drawnPoi = position ? position : null
                 console.log("POI clicked:", plannerRoot.drawnPoi)
+                // 在地图上显示单点预览（复用 showPlannedRoute 接口）
+                try {
+                    if (plannerRoot.mapObj && plannerRoot.mapObj.showPlannedRoute) {
+                        plannerRoot.mapObj.showPlannedRoute([plannerRoot.drawnPoi])
+                    } else if (typeof mapView !== "undefined") {
+                        mapView.runJavaScript("if(window.showPlannedRoute) { window.showPlannedRoute(" + JSON.stringify([plannerRoot.drawnPoi]) + "); }")
+                    }
+                } catch (e) { console.warn("onPoiClicked preview error:", e) }
             } catch (e) {
                 console.warn("onPoiClicked handler error:", e)
             }
