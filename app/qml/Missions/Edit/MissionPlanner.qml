@@ -168,7 +168,7 @@ ColumnLayout {
 
         RowLayout {
             Controls.Label { text: "Heading Overlap:" }
-            Controls.SpinBox { id: frontOverlap2; from: 0; to: 100; value: 75; Layout.preferredWidth: 80 }
+            Controls.SpinBox { id: frontOverlap2; from: 0; to: 100; value: 75; Layout.preferredWidth: 120 }
             Controls.Label { text: "%" }
         }
     }
@@ -186,19 +186,19 @@ ColumnLayout {
 
         RowLayout {
             Controls.Label { text: "Radius:" }
-            Controls.SpinBox { id: radiusField; from: 10; to: 1000; value: 50; Layout.preferredWidth: 80 }
+            Controls.SpinBox { id: radiusField; from: 10; to: 1000; value: 50; Layout.preferredWidth: 150 }
             Controls.Label { text: "m" }
         }
 
         RowLayout {
             Controls.Label { text: "Heading Overlap:" }
-            Controls.SpinBox { id: frontOverlap3; from: 0; to: 100; value: 80; Layout.preferredWidth: 80 }
+            Controls.SpinBox { id: frontOverlap3; from: 0; to: 100; value: 80; Layout.preferredWidth: 120 }
             Controls.Label { text: "%" }
         }
 
         RowLayout {
             Controls.Label { text: "Lateral Overlap:" }
-            Controls.SpinBox { id: sideOverlap3; from: 0; to: 100; value: 70; Layout.preferredWidth: 80 }
+            Controls.SpinBox { id: sideOverlap3; from: 0; to: 100; value: 70; Layout.preferredWidth: 120 }
             Controls.Label { text: "%" }
         }
     }
