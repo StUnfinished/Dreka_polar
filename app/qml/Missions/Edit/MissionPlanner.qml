@@ -81,7 +81,7 @@ ColumnLayout {
     // 顶部下拉框，选择测图类型
     Controls.ComboBox {
         id: missionTypeBox
-        model: [qsTr("Flight Route Planning"), qsTr("Area Mapping"), qsTr("Strip Mapping"), qsTr("POI Mapping")]
+        model: [qsTr("Flight Route Planning"), qsTr("Area Mapping"), qsTr("Strip Mapping"), qsTr("POI Mapping"), qsTr("Spiral Mapping")]
         currentIndex: 0   // 默认选中第一个
         Layout.fillWidth: true
 
@@ -115,7 +115,14 @@ ColumnLayout {
                     plannerRoot.mapObj.setCursorPlus(true)
                     plannerRoot.mapObj.enablePoiClick(true)
                 }
-            } else {
+            } else if (plannerRoot.selectedMissionType === qsTr("Spiral Mapping")) {
+                if (plannerRoot.mapObj) {
+                    plannerRoot.mapObj.enableTopDownView(true)
+                    plannerRoot.mapObj.setCursorPlus(true)
+                    plannerRoot.mapObj.enableRectangleDraw(true)
+                }
+            }
+            else {
                 // Flight Route Planning 或其它情况 → 恢复默认
                 if (plannerRoot.mapObj) {
                     plannerRoot.mapObj.enableTopDownView(false)
@@ -203,6 +210,40 @@ ColumnLayout {
         }
     }
 
+        // ================= Spiral Mapping =================
+    ColumnLayout {
+        visible: plannerRoot.selectedMissionType === qsTr("Spiral Mapping")
+        spacing: 4
+
+        RowLayout {
+            Controls.Label { text: "GSD:" }
+            Controls.TextField { id: gsdFieldSpiral; placeholderText: "GSD (m)"; text: "0.05" } 
+            Controls.Label { text: "m" }
+        }
+
+        RowLayout {
+            Controls.Label { text: "Spiral Type:" }
+            Controls.ComboBox {
+                id: spiralTypeBox
+                model: [qsTr("Expansion"), qsTr("Contraction")]
+                currentIndex: 0
+                Layout.preferredWidth: 150
+            }
+        }
+
+        RowLayout {
+            Controls.Label { text: "Heading Overlap:" }
+            Controls.SpinBox { id: frontOverlapSpiral; from: 0; to: 100; value: 70; Layout.preferredWidth: 120 }
+            Controls.Label { text: "%" }
+        }
+
+        RowLayout {
+            Controls.Label { text: "Lateral Overlap:" }
+            Controls.SpinBox { id: sideOverlapSpiral; from: 0; to: 100; value: 60; Layout.preferredWidth: 120 }
+            Controls.Label { text: "%" }
+        }
+    }
+
     // ================= 生成按钮 =================
     RowLayout {
         Layout.fillWidth: true
@@ -242,6 +283,19 @@ ColumnLayout {
                         poi: plannerRoot.drawnPoi
                     }
                     plannerRoot.lastRequestedPattern = "poi"
+                } else if (plannerRoot.selectedMissionType === qsTr("Spiral Mapping")) {
+                    params = {
+                        gsd_m: parseFloat(gsdFieldSpiral.text),
+                        spiral_type: spiralTypeBox.currentText === qsTr("Expansion") ? "expansion" : "contraction",
+                        front_overlap: frontOverlapSpiral.value,
+                        side_overlap: sideOverlapSpiral.value,
+                        pattern: "spiral",
+                        polygon: plannerRoot.drawnPolygon
+                    }
+                    plannerRoot.lastRequestedPattern = "spiral"
+                } else {
+                    console.warn("Unsupported mission type for generation:", plannerRoot.selectedMissionType)
+                    return
                 }
 
                 // 新增：在 QML 控制台打印要发送的参数（便于调试）
@@ -277,9 +331,14 @@ ColumnLayout {
                     } else if (plannerRoot.lastRequestedPattern === "poi" && typeof missionPlannerController.generatePoiMission === "function") {
                         console.log("Calling missionPlannerController.generatePoiMission(...)")
                         missionPlannerController.generatePoiMission(params)
-                    } else {
+                    } else if (plannerRoot.lastRequestedPattern === "area" && typeof missionPlannerController.generateAreaMission === "function") {
                         console.log("Calling missionPlannerController.generateAreaMission(...)")
                         missionPlannerController.generateAreaMission(params)
+                    } else if (plannerRoot.lastRequestedPattern === "spiral" && typeof missionPlannerController.generateSpiralMission === "function") {
+                        console.log("Calling missionPlannerController.generateSpiralMission(...)")
+                        missionPlannerController.generateSpiralMission(params)
+                    } else {
+                        console.warn("Unsupported or missing backend method for pattern:", plannerRoot.lastRequestedPattern)
                     }
                 } else {
                      console.warn("missionPlannerController not found")
@@ -462,6 +521,6 @@ ColumnLayout {
                 if (plannerRoot.mapObj.setCursorPlus) plannerRoot.mapObj.setCursorPlus(false)
                 if (plannerRoot.mapObj.enableTopDownView) plannerRoot.mapObj.enableTopDownView(false)
             } catch (e) { console.warn("closeDrawMode error:", e) }
-        }
+        }  
     }
 }

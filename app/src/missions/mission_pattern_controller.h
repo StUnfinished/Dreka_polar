@@ -37,6 +37,7 @@ public:
     Q_INVOKABLE void generateAreaMission(const QVariantMap &params);
     Q_INVOKABLE void generateStripMission(const QVariantMap &params);
     Q_INVOKABLE void generatePoiMission(const QVariantMap &params);
+    Q_INVOKABLE void generateSpiralMission(const QVariantMap &params);
 
     // Add: clear all route items from current mission
     Q_INVOKABLE void clearAllRouteItems();
