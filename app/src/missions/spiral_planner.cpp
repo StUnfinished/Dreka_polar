@@ -153,6 +153,7 @@ static QVector<QPointF> samplePolygonPerimeter(const QPolygonF &poly, double spa
     return samples;
 }
 
+
 namespace planner
 {
 
@@ -170,7 +171,7 @@ QVariantList planSpiralMission(const QVariantMap &params, const CameraModel &cam
         return result;
     }
 
-    // read polygon lat/lon/alt
+    // --- 1. 读取输入并计算平均地面高度 ---
     QVector<QPointF> polyLatLon;
     double sumAlt = 0.0;
     int altCount = 0;
@@ -186,7 +187,7 @@ QVariantList planSpiralMission(const QVariantMap &params, const CameraModel &cam
     double lat0 = polyLatLon[0].x();
     double lon0 = polyLatLon[0].y();
 
-    // project to local XY
+    // --- 2. 投影到局部 XY 平面 ---
     QPolygonF polyXY;
     for (auto &p : polyLatLon) {
         double x, y;
@@ -194,17 +195,16 @@ QVariantList planSpiralMission(const QVariantMap &params, const CameraModel &cam
         polyXY.append(QPointF(x, y));
     }
 
-    // parameters
+    // --- 3. 参数提取 ---
     double gsd_m = params.value("gsd_m", 0.05).toDouble();
     double sideOverlap = params.value("side_overlap", 70.0).toDouble() / 100.0;
-    double frontOverlap = params.value("front_overlap", 70.0).toDouble() / 100.0;
-    QString spiralType = params.value("spiral_type", "contraction").toString().toLower();
-
     double altitudeM = params.value("altitude_m", 0.0).toDouble();
-    if (altitudeM <= 0.0 && gsd_m > 0.0) {
+    QString spiralDirection = params.value("spiral_direction", "inward").toString().toLower(); // inward/outward
+
+    if (altitudeM <= 0.0 && gsd_m > 0.0)
         altitudeM = gsd_m * cameraModel.focalLengthMm() * double(cameraModel.imageWidthPx()) / cameraModel.sensorWidthMm();
-    }
-    if (altitudeM <= 0.0) altitudeM = params.value("default_altitude_m", 120.0).toDouble();
+    if (altitudeM <= 0.0)
+        altitudeM = params.value("default_altitude_m", 120.0).toDouble();
 
     if (gsd_m <= 0.0) {
         double rx, ry;
@@ -212,38 +212,33 @@ QVariantList planSpiralMission(const QVariantMap &params, const CameraModel &cam
         gsd_m = rx;
     }
 
-    // swath width approx
+    // --- 4. 计算环间间距 ---
     double swathWidth = (cameraModel.sensorWidthMm() / cameraModel.focalLengthMm()) * altitudeM;
-    if (swathWidth <= 0.0) swathWidth = gsd_m * cameraModel.imageWidthPx();
+    if (swathWidth <= 0.0)
+        swathWidth = gsd_m * cameraModel.imageWidthPx();
     double ringSpacing = swathWidth * (1.0 - sideOverlap);
-    if (ringSpacing < 0.5) ringSpacing = swathWidth * 0.5;
+    if (ringSpacing < 0.5)
+        ringSpacing = swathWidth * 0.5;
 
-    // along-track spacing
-    double img_h_px = double(cameraModel.imageHeightPx());
-    double alongImageLength = gsd_m * img_h_px;
-    double alongSpacing = alongImageLength * (1.0 - frontOverlap);
-    if (alongSpacing <= 0.1) alongSpacing = gsd_m * 2.0;
+    qDebug() << "[planSpiralMission] ringSpacing =" << ringSpacing;
 
-    qDebug() << "[planSpiralMission] swathWidth =" << swathWidth << " ringSpacing =" << ringSpacing << " alongSpacing =" << alongSpacing;
-
-    // generate inward-offset rings until polygon too small or max rings
+    // --- 5. 生成多层环 ---
     QVector<QPolygonF> rings;
     QPolygonF current = polyXY;
-    const int maxRings = 200;
+    const int maxRings = 300;
     int ringCount = 0;
-
-    // store minimal area threshold (stop when area too small)
-    double baseArea = qAbs(current.boundingRect().width() * current.boundingRect().height());
-    double minAreaThreshold = qMax(1.0, ringSpacing * ringSpacing); // meters^2
+    double minAreaThreshold = qMax(1.0, ringSpacing * ringSpacing);
 
     while (current.size() >= 3 && ringCount < maxRings) {
         rings.append(current);
         QPolygonF next = offsetPolygonInward(current, ringSpacing);
         if (next.size() < 3) break;
+
         double areaCurrent = qAbs(current.boundingRect().width() * current.boundingRect().height());
         double areaNext = qAbs(next.boundingRect().width() * next.boundingRect().height());
         if (areaNext < minAreaThreshold) break;
         if (qFuzzyCompare(areaNext + 1.0, areaCurrent + 1.0)) break;
+
         current = next;
         ringCount++;
     }
@@ -253,100 +248,95 @@ QVariantList planSpiralMission(const QVariantMap &params, const CameraModel &cam
         return result;
     }
 
-    // order rings
-    QVector<QPolygonF> orderedRings;
-    if (spiralType == "expansion") {
-        orderedRings = rings;
+    // --- 6. 按方向排序 ---
+    bool outward = (spiralDirection == "outward");
+    QVector<QPolygonF> orderedRings = rings;
+    if (outward)
         std::reverse(orderedRings.begin(), orderedRings.end());
-    } else {
-        orderedRings = rings;
+
+   // --- 7. 构建简化版螺旋航线（每环仅保留 5 个关键点） ---
+QVector<QPointF> stitchedXY;
+QPointF lastXY(1e12, 1e12);
+bool haveLast = false;
+
+const int pointsPerRing = 5; // 每环保留的点数（含闭合点）
+
+for (int ri = 0; ri < orderedRings.size(); ++ri) {
+    QPolygonF ring = orderedRings[ri];
+    if (ring.isEmpty()) continue;
+
+    // 去除重复首尾点（若 polygon 自动闭合）
+    if ((ring.first() - ring.last()).manhattanLength() < 1e-6)
+        ring.removeLast();
+
+    int totalPts = ring.size();
+    if (totalPts < pointsPerRing) {
+        // 若点数太少直接保留全部顶点
+        for (const QPointF &p : ring)
+            stitchedXY.append(p);
+        continue;
     }
 
-    QPointF lastAddedXY(1e12, 1e12);
-    bool haveLast = false;
+    // === 保留点选取规则 ===
+    QVector<int> selectedIdx;
+    selectedIdx.append(0); // 起点 A1
+    selectedIdx.append(totalPts / 5);  // 约 20% 位置
+    selectedIdx.append(2 * totalPts / 5);
+    selectedIdx.append(3 * totalPts / 5);
+    selectedIdx.append(totalPts - 1);  // 环终点（接近起点）
 
-    // === 主循环：每个环使用顶点 + 邻近点（确保环能闭合且连通） ===
-    for (int ri = 0; ri < orderedRings.size(); ++ri) {
-        QPolygonF ring = orderedRings[ri];
-        if (ring.size() < 3) continue;
+    QVector<QPointF> foldPts;
+    for (int idx : selectedIdx)
+        foldPts.append(ring[idx]);
 
-        // build vertex list (no duplicated closing vertex assumed)
-        QVector<QPointF> verts;
-        for (int i = 0; i < ring.size(); ++i) verts.append(ring[i]);
-
-        // rotate ring to best connect with previous (if haveLast), use nearest vertex to lastAddedXY
-        if (haveLast) {
-            int bestIdx = 0; double bestDist = 1e18;
-            for (int i = 0; i < verts.size(); ++i) {
-                double dx = verts[i].x() - lastAddedXY.x();
-                double dy = verts[i].y() - lastAddedXY.y();
-                double d2 = dx*dx + dy*dy;
-                if (d2 < bestDist) { bestDist = d2; bestIdx = i; }
-            }
-            // rotate so bestIdx becomes index 0
-            QVector<QPointF> rot; rot.reserve(verts.size());
-            for (int k = 0; k < verts.size(); ++k) rot.append(verts[(bestIdx + k) % verts.size()]);
-            verts = rot;
+    // === 确保起点/终点一致方向 ===
+    // 若不是第一个环，则将当前环旋转，使其起点最靠近上一环末点
+    if (haveLast && !foldPts.isEmpty()) {
+        int bestIdx = 0;
+        double bestDist2 = 1e18;
+        for (int i = 0; i < foldPts.size(); ++i) {
+            double dx = foldPts[i].x() - lastXY.x();
+            double dy = foldPts[i].y() - lastXY.y();
+            double d2 = dx*dx + dy*dy;
+            if (d2 < bestDist2) { bestDist2 = d2; bestIdx = i; }
         }
 
-        // alternate ring direction for snake-like continuity
-        if (ri % 2 == 1) std::reverse(verts.begin(), verts.end());
-
-        // build output points for this ring:
-        // for each vertex v_i, output v_i and a neighbor point moved toward next vertex by dAdd
-        QVector<QPointF> ringOut; ringOut.reserve(verts.size()*2);
-        for (int i = 0; i < verts.size(); ++i) {
-            QPointF v = verts[i];
-            QPointF next = verts[(i + 1) % verts.size()];
-            double ex = next.x() - v.x();
-            double ey = next.y() - v.y();
-            double edgeLen = qSqrt(ex*ex + ey*ey);
-            // desired neighbor offset distance: keep it moderate
-            double dAdd = qMin(alongSpacing * 0.5, edgeLen * 0.3);
-            if (dAdd < 1e-6) {
-                // if edge too short, choose midpoint scaled small
-                QPointF neighbor = QPointF((v.x() + next.x())*0.5, (v.y() + next.y())*0.5);
-                ringOut.append(v);
-                ringOut.append(neighbor);
-            } else {
-                double nx = ex / edgeLen;
-                double ny = ey / edgeLen;
-                QPointF neighbor = QPointF(v.x() + nx * dAdd, v.y() + ny * dAdd);
-                ringOut.append(v);
-                ringOut.append(neighbor);
-            }
-        }
-
-        // ensure closure: if last point too far from first, optionally append first vertex to close loop
-        if (!ringOut.isEmpty()) {
-            QPointF firstPt = ringOut.front();
-            QPointF lastPt = ringOut.back();
-            double dx = firstPt.x() - lastPt.x();
-            double dy = firstPt.y() - lastPt.y();
-            if (qSqrt(dx*dx + dy*dy) > ringSpacing * 0.5) {
-                // append first vertex to close
-                ringOut.append(firstPt);
-            }
-        }
-
-        // convert ringOut XY -> latlon and append to result
-        for (const QPointF &xy : ringOut) {
-            double lat, lon;
-            xyToLatLon(lat0, lon0, xy.x(), xy.y(), lat, lon);
-            QVariantMap wp;
-            wp["latitude"] = lat;
-            wp["longitude"] = lon;
-            wp["altitude"] = avgGroundAlt + altitudeM;
-            result.append(wp);
-
-            lastAddedXY = xy;
-            haveLast = true;
-        }
+        QVector<QPointF> rotated;
+        for (int k = 0; k < foldPts.size(); ++k)
+            rotated.append(foldPts[(bestIdx + k) % foldPts.size()]);
+        foldPts = rotated;
     }
 
-    qDebug() << "[planSpiralMission] generated folded-ring waypoints:" << result.size();
+    // 偶数环反转（蛇形连续连接）
+    if (ri % 2 == 1)
+        std::reverse(foldPts.begin(), foldPts.end());
+
+    // 添加该环到总路径
+    for (const QPointF &p : foldPts) {
+        stitchedXY.append(p);
+        lastXY = p;
+        haveLast = true;
+    }
+}
+
+
+    qDebug() << "[planSpiralMission] fold waypoints count:" << stitchedXY.size();
+
+    // --- 8. 输出最终航点 ---
+    for (const QPointF &xy : stitchedXY) {
+        double lat, lon;
+        xyToLatLon(lat0, lon0, xy.x(), xy.y(), lat, lon);
+        QVariantMap wp;
+        wp["latitude"] = lat;
+        wp["longitude"] = lon;
+        wp["altitude"] = avgGroundAlt + altitudeM;
+        result.append(wp);
+    }
+
     return result;
 }
+
+
 
 
 } // namespace planner
