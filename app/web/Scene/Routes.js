@@ -23,7 +23,7 @@ class RouteItem extends ComplexSign {
         for (const sign of this.signs) {
             sign.draggable = editMode;
         }
-        this.normalColor = editMode ? Cesium.Color.YELLOW : Cesium.Color.WHITE;
+        this.normalColor = editMode ? Cesium.Color.YELLOW : Cesium.Color.ORANGE;
     }
 }
 
@@ -163,7 +163,7 @@ class Route {
                                                                        second.position]; }, false),
                 arcType: Cesium.ArcType.GEODESIC,
                 material: new Cesium.PolylineArrowMaterialProperty(new Cesium.CallbackProperty(() => {
-                    return that.editMode ? Cesium.Color.YELLOW : Cesium.Color.WHITE;
+                    return that.editMode ? Cesium.Color.YELLOW : Cesium.Color.ORANGE;
                 })),
                 width: 8.0
             }

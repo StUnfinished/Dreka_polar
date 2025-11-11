@@ -29,8 +29,8 @@ class Area {
                 }, false),
                 outline: true,
                 outlineWidth: this.lineWidth,
-                outlineColor: Cesium.Color.WHITE,
-                material: new Cesium.ColorMaterialProperty(Cesium.Color.WHITE.withAlpha(0.2)),
+                outlineColor: Cesium.Color.GREEN,
+                material: new Cesium.ColorMaterialProperty(Cesium.Color.GREEN.withAlpha(0.4)),
                 perPositionHeight: true,
                 arcType: Cesium.ArcType.GEODESIC
             },
@@ -47,7 +47,7 @@ class Area {
      */
     addPosition(position) {
         var that = this;
-        var newPoint = new TerrainPoint(this.viewer, this.interaction, position, Cesium.Color.WHITE);
+        var newPoint = new TerrainPoint(this.viewer, this.interaction, position, Cesium.Color.GREEN);
         if (that.changedCallback)
             newPoint.updateCallback = () => { that.changedCallback(); }
         newPoint.deleteCallback = () => { that.removePosition(that.points.indexOf(newPoint)); }

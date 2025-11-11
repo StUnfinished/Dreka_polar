@@ -5,6 +5,7 @@
 #include <QPointF>
 #include <QLineF>
 #include <QDebug>
+#include <algorithm>
 
 static constexpr double EARTH_RADIUS_M = 6378137.0;
 
@@ -220,6 +221,13 @@ QVariantList planSpiralMission(const QVariantMap &params, const CameraModel &cam
     if (ringSpacing < 0.5)
         ringSpacing = swathWidth * 0.5;
 
+    // 计算前向（沿轨）间距，用于决定闭合段的额外航点位置
+    double frontOverlap = params.value("front_overlap", 70.0).toDouble() / 100.0;
+    double img_h_px = double(cameraModel.imageHeightPx());
+    double alongImageLength = gsd_m * img_h_px;
+    double alongSpacing = alongImageLength * (1.0 - frontOverlap);
+    if (alongSpacing <= 0.1) alongSpacing = gsd_m * 2.0;
+
     qDebug() << "[planSpiralMission] ringSpacing =" << ringSpacing;
 
     // --- 5. 生成多层环 ---
@@ -259,8 +267,6 @@ QVector<QPointF> stitchedXY;
 QPointF lastXY(1e12, 1e12);
 bool haveLast = false;
 
-const int pointsPerRing = 5; // 每环保留的点数（含闭合点）
-
 for (int ri = 0; ri < orderedRings.size(); ++ri) {
     QPolygonF ring = orderedRings[ri];
     if (ring.isEmpty()) continue;
@@ -270,27 +276,38 @@ for (int ri = 0; ri < orderedRings.size(); ++ri) {
         ring.removeLast();
 
     int totalPts = ring.size();
-    if (totalPts < pointsPerRing) {
-        // 若点数太少直接保留全部顶点
-        for (const QPointF &p : ring)
-            stitchedXY.append(p);
-        continue;
+    if (totalPts == 0) continue;
+
+    // --- 选择保留的顶点索引（selectedIdx），并由此构建 foldPts ---
+    const int pointsPerRing = 5;
+    QVector<int> selectedIdx;
+    selectedIdx.reserve(pointsPerRing);
+
+    if (totalPts <= pointsPerRing) {
+        for (int i = 0; i < totalPts; ++i) selectedIdx.append(i);
+    } else {
+        double step = double(totalPts) / double(pointsPerRing);
+        for (int k = 0; k < pointsPerRing; ++k) {
+            int idx = int(floor(k * step)) % totalPts;
+            if (!selectedIdx.contains(idx)) selectedIdx.append(idx);
+        }
+        // 补足不足的索引（从末尾向前找）
+        int tryIdx = totalPts - 1;
+        int fill = 0;
+        while (selectedIdx.size() < pointsPerRing && fill < totalPts) {
+            if (!selectedIdx.contains(tryIdx)) selectedIdx.append(tryIdx);
+            --tryIdx; ++fill;
+        }
     }
 
-    // === 保留点选取规则 ===
-    QVector<int> selectedIdx;
-    selectedIdx.append(0); // 起点 A1
-    selectedIdx.append(totalPts / 5);  // 约 20% 位置
-    selectedIdx.append(2 * totalPts / 5);
-    selectedIdx.append(3 * totalPts / 5);
-    selectedIdx.append(totalPts - 1);  // 环终点（接近起点）
-
+    // 构建 foldPts（按 selectedIdx 的顺序）
     QVector<QPointF> foldPts;
-    for (int idx : selectedIdx)
-        foldPts.append(ring[idx]);
+    foldPts.reserve(selectedIdx.size());
+    for (int idx : selectedIdx) {
+        if (idx >= 0 && idx < totalPts) foldPts.append(ring[idx]);
+    }
 
-    // === 确保起点/终点一致方向 ===
-    // 若不是第一个环，则将当前环旋转，使其起点最靠近上一环末点
+    // 若不是第一个环，则旋转当前环使其起点最靠近上一环末点（保证连接平滑）
     if (haveLast && !foldPts.isEmpty()) {
         int bestIdx = 0;
         double bestDist2 = 1e18;
@@ -300,19 +317,61 @@ for (int ri = 0; ri < orderedRings.size(); ++ri) {
             double d2 = dx*dx + dy*dy;
             if (d2 < bestDist2) { bestDist2 = d2; bestIdx = i; }
         }
-
-        QVector<QPointF> rotated;
-        for (int k = 0; k < foldPts.size(); ++k)
-            rotated.append(foldPts[(bestIdx + k) % foldPts.size()]);
-        foldPts = rotated;
+        // 同步旋转 selectedIdx 与 foldPts 保持对应关系
+        QVector<QPointF> rotatedPts;
+        QVector<int> rotatedIdx;
+        rotatedPts.reserve(foldPts.size());
+        rotatedIdx.reserve(selectedIdx.size());
+        for (int k = 0; k < foldPts.size(); ++k) {
+            rotatedPts.append(foldPts[(bestIdx + k) % foldPts.size()]);
+            rotatedIdx.append(selectedIdx[(bestIdx + k) % selectedIdx.size()]);
+        }
+        foldPts = rotatedPts;
+        selectedIdx = rotatedIdx;
     }
 
-    // 偶数环反转（蛇形连续连接）
-    if (ri % 2 == 1)
-        std::reverse(foldPts.begin(), foldPts.end());
+    // --- 新增：在foldPts最后额外加入一个靠近环起始点的邻近点（用以闭合/平滑连接） ---
+    if (!selectedIdx.isEmpty()) {
+        int startIdx = selectedIdx[0] % totalPts;
+        QPointF startP = ring[startIdx];
 
-    // 添加该环到总路径
+        // 在当前环的最后点与起点之间插入一个额外点：
+        // - 若两点间距大于沿距 alongSpacing，则额外点放在起点沿向量指向最后点处、距离为沿距
+        // - 否则放在两点中点处（作为退化处理）
+        if (!foldPts.isEmpty()) {
+            QPointF lastP = foldPts.last();
+            double dxLS = lastP.x() - startP.x();
+            double dyLS = lastP.y() - startP.y();
+            double distLS = qSqrt(dxLS*dxLS + dyLS*dyLS);
+            QPointF extra;
+            if (distLS > 1e-6) {
+                if (distLS > alongSpacing + 1e-6) {
+                    // 从起点出发，沿向量方向移动 alongSpacing
+                    double ux = dxLS / distLS;
+                    double uy = dyLS / distLS;
+                    extra = QPointF(startP.x() + ux * alongSpacing, startP.y() + uy * alongSpacing);
+                } else {
+                    // 两点相距较近，取中点
+                    extra = QPointF((startP.x() + lastP.x()) * 0.5, (startP.y() + lastP.y()) * 0.5);
+                }
+                // 仅在额外点与最后点距离不太接近时加入
+                double ddx = extra.x() - lastP.x();
+                double ddy = extra.y() - lastP.y();
+                if (ddx*ddx + ddy*ddy > 1e-6) {
+                    foldPts.append(extra);
+                }
+            }
+        }
+    }
+
+    // 保持所有环同一方向（不要交替反转），直接追加到 stitchedXY
     for (const QPointF &p : foldPts) {
+        // 去重非常接近的点
+        if (haveLast) {
+            double dx = p.x() - lastXY.x();
+            double dy = p.y() - lastXY.y();
+            if (dx*dx + dy*dy < 1e-6) continue;
+        }
         stitchedXY.append(p);
         lastXY = p;
         haveLast = true;
@@ -335,8 +394,6 @@ for (int ri = 0; ri < orderedRings.size(); ++ri) {
 
     return result;
 }
-
-
 
 
 } // namespace planner
