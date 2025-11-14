@@ -14,4 +14,5 @@ namespace planner
     //  - surrounding_type: "expansion" or "contraction"
     // cameraModel must be provided (loaded)
     QVariantList planSpiralMission(const QVariantMap &params, const CameraModel &cameraModel);
+    
 }

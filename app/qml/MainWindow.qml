@@ -65,4 +65,5 @@ Controls.ApplicationWindow {
         height: Math.min(implicitHeight, main.height - map.controlHeight - menuBar.height -
                                          Controls.Theme.margins * 2)
     }
+
 }

@@ -275,8 +275,8 @@ class CesiumWrapper {
                             window._finalPolylineEntity = viewer.entities.add({
                                 polyline: {
                                     positions: positions,
-                                    width: 2,
-                                    material: Cesium.Color.YELLOW.withAlpha(0.8),
+                                    width: 4,
+                                    material: Cesium.Color.YELLOW.withAlpha(1.0),
                                     clampToGround: false
                                 }
                             });

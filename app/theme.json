@@ -33,32 +33,37 @@
         "positive": "#65c20a"
     },
     "colors_night": {
-        "background": "#AA000000",
-        "sunken": "#EE000000",
-        "raised": "#88000000",
-        "text": "#ffffff",
-        "description": "#899ea9",
+        // 背景与控件设为纯黑，文字与图标为白色
+        "background": "#000000",
+        "sunken": "#000000",
+        "raised": "#000000",
+        "text": "#FFFFFF",
+        "description": "#DDDDDD",
         "disabled": "#4F5D64",
 
-        "control": "#AA000000",
-        "controlBorder": "#6c8693",
-        "line": "#805a717c",
-        "controlText": "#ffffff",
+        "control": "#000000",
+        "controlBorder": "#2B2B2B",
+        "line": "#333333",
+        "controlText": "#FFFFFF",
 
         "tip": "#147a7e",
-        "tipText": "#ffffff",
+        "tipText": "#FFFFFF",
 
         "selection": "#147a7e",
-        "selectedText": "#ffffff",
+        "selectedText": "#FFFFFF",
 
         "highlight": "#199499",
         "hover": "#33ffffff",
-        "highlightedText": "#ffffff",
+        "highlightedText": "#FFFFFF",
 
         "link": "#51a0e7",
         "negative": "#e53535",
         "neutral": "#ff9800",
-        "positive": "#86c34a"
+        "positive": "#86c34a",
+
+        // 额外图标颜色键（若主题解析器支持）
+        "icon": "#FFFFFF",
+        "iconActive": "#FFFFFF"
     },
     "factors": {
         "auxFontSize": 0.4,
